@@ -18,7 +18,15 @@ var s bossapi.Strategy // GET /api/v1/strategies/{slug}
   exists.
 - **Language** is `?lang=en|es|pt`. Empty means `en`.
 - **Errors** come back as JSON `{"code": "...", "message": "..."}` with
-  status 404 (`not_found`) or 400 (`invalid_argument`).
+  status 404 (`not_found`) or 400 (`invalid_argument`), and since v0.2.0
+  429 (`quota_exceeded`, with `reset_at`). `/api/v2` adds 402
+  (`pass_required`, `pass_expired`, with `checkout`), 401 (`pass_invalid`)
+  and 403 (`plan_required`).
+- **Quotas** (since v0.2.0): calls are counted per day (UTC) and per
+  endpoint class (`ClassOf`: content, market, premium). Every counted
+  response carries `X-Quota-Limit`, `X-Quota-Remaining` and
+  `X-Quota-Reset` (RFC 3339). The numbers are the site's to tune; read
+  them from the headers.
 - **Caching:** content may be cached for 5 minutes. Market data and paper
   analysis are `no-store`.
 - **Prices** are in USD. Each quote carries `underlying_usd`, so a client
@@ -61,6 +69,30 @@ position; `query` is a strategy-page query such as
 `currency=BTC&exchange=deribit`; `slug` may be empty. The page asks the
 user before importing the position into their browser. Nothing is sent
 to the server.
+
+## `/api/v2`: the subscription pass
+
+Since v0.2.0. `/api/v2` serves the same paths and the same JSON as
+`/api/v1`; it adds the BOSS pass, sent as a bearer token:
+
+```
+GET /api/v2/scan?currency=BTC
+Authorization: Bearer v4.public.eyJ...
+```
+
+| Class | Endpoints | Without a pass | With a Pro+MCP pass |
+|---|---|---|---|
+| content | strategies, articles, concepts, glossary, search | per-IP quota | the pass's quota |
+| market | markets, expiries, chain, quote | per-IP quota (lower) | the pass's quota |
+| premium | scan, paper/analyze, paper/adjust | 402 `pass_required` | the pass's quota |
+
+A Pro pass (the site plan) counts as no pass here. `GET /api/v2/pass`
+answers `PassStatus`: the plan, its expiry and today's quota use. A pass
+is a PASETO v4.public token the site verifies on its own, without an
+account; buy or renew one at the URL in an error's `checkout`.
+
+`/api/v1` keeps working, never looks at a pass, and is held to its own
+per-IP quota.
 
 ## Compatibility
 
