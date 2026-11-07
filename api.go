@@ -4,6 +4,9 @@
 // (github.com/OptionsBoss/bossmcp) -- and the site itself share one
 // definition and can't drift apart.
 //
+// /api/v2 (since v0.2.0) serves the same paths and JSON and adds the
+// subscription pass and quotas; see PrefixV2.
+//
 // Every endpoint is GET-only, sets no cookies and changes nothing. The
 // language of content is the ?lang= query parameter (en, es, pt; empty
 // means en). Misses and bad requests answer with an Error as JSON and a
@@ -78,18 +81,91 @@ func CurrencyOf(instrument string) string {
 }
 
 // Error is a request the API can't answer. Code is stable and
-// machine-readable; Message is for a human.
+// machine-readable; Message is for a human. Checkout and ResetAt are set
+// only by the codes that need them (since v0.2.0): where to get or renew
+// a pass, and when a used-up quota starts over.
 type Error struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code     string     `json:"code"`
+	Message  string     `json:"message"`
+	Checkout string     `json:"checkout,omitempty"`
+	ResetAt  *time.Time `json:"reset_at,omitempty"`
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
 
 const (
-	CodeNotFound        = "not_found"
-	CodeInvalidArgument = "invalid_argument"
+	CodeNotFound        = "not_found"        // 404
+	CodeInvalidArgument = "invalid_argument" // 400
+
+	// Since v0.2.0.
+	CodeQuotaExceeded = "quota_exceeded" // 429, v1 and v2: ResetAt says when it starts over
+	CodePassRequired  = "pass_required"  // 402, v2: this endpoint needs a pass; Checkout says where
+	CodePassExpired   = "pass_expired"   // 402, v2: the pass ran out; Checkout renews it
+	CodePassInvalid   = "pass_invalid"   // 401, v2: not a pass this site accepts, or revoked
+	CodePlanRequired  = "plan_required"  // 403, v2: the pass's plan doesn't include this endpoint
 )
+
+// --- /api/v2 (since v0.2.0) ---
+//
+// /api/v2 serves the same paths and the same JSON as /api/v1; what it
+// adds is the subscription pass. A request sends it as
+//
+//	Authorization: Bearer v4.public....
+//
+// and every response carries the caller's quota in the Header* headers.
+// /api/v1 stays open, under a low per-IP quota of its own, and never
+// looks at a pass.
+
+// PrefixV2 is where the pass-aware version is mounted.
+const PrefixV2 = "/api/v2/"
+
+// Quota headers, on every /api/v1 and /api/v2 response that counts
+// against one. Reset is RFC 3339.
+const (
+	HeaderQuotaLimit     = "X-Quota-Limit"
+	HeaderQuotaRemaining = "X-Quota-Remaining"
+	HeaderQuotaReset     = "X-Quota-Reset"
+)
+
+// Endpoint classes: what a quota counts and what a pass unlocks.
+const (
+	ClassContent = "content" // strategies, articles, concepts, glossary, search
+	ClassMarket  = "market"  // markets, expiries, chain, quote
+	ClassPremium = "premium" // scan, paper/*: in v2, only with a Pro+MCP pass
+)
+
+// ClassOf is the class of an endpoint, given its path after the prefix
+// ("scan", "strategies/long-call"); "" for a path the API doesn't serve.
+func ClassOf(endpoint string) string {
+	head, _, _ := strings.Cut(strings.TrimPrefix(endpoint, "/"), "/")
+	switch head {
+	case "strategies", "articles", "concepts", "glossary", "search":
+		return ClassContent
+	case "markets", "expiries", "chain", "quote":
+		return ClassMarket
+	case "scan", "paper":
+		return ClassPremium
+	}
+	return ""
+}
+
+// Plans a pass can carry. PlanProMCP includes everything PlanPro does.
+const (
+	PlanPro    = "pro"
+	PlanProMCP = "pro_mcp"
+)
+
+// PassStatus is GET /api/v2/pass: what the sent pass is, and how much of
+// its quota is left today. Without a pass the endpoint answers
+// pass_required.
+type PassStatus struct {
+	Plan       string    `json:"plan"`
+	Founder    bool      `json:"founder,omitempty"`
+	Expires    time.Time `json:"expires"`
+	QuotaLimit int       `json:"quota_limit"`
+	QuotaUsed  int       `json:"quota_used"`
+	ResetAt    time.Time `json:"reset_at"`
+}
 
 // Classification is a strategy's six dimensions, localized.
 type Classification struct {

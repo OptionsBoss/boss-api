@@ -31,7 +31,33 @@ func TestWireNames(t *testing.T) {
 	if string(b) != `{"code":"not_found","message":"x"}` {
 		t.Errorf("Error wire form = %s", b)
 	}
-	if Prefix != "/api/v1/" {
-		t.Errorf("Prefix = %q", Prefix)
+	if Prefix != "/api/v1/" || PrefixV2 != "/api/v2/" {
+		t.Errorf("Prefix = %q, PrefixV2 = %q", Prefix, PrefixV2)
+	}
+	reset := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC)
+	b, _ = json.Marshal(Error{Code: CodeQuotaExceeded, Message: "x", ResetAt: &reset, Checkout: "https://pay.example/"})
+	if string(b) != `{"code":"quota_exceeded","message":"x","checkout":"https://pay.example/","reset_at":"2026-11-08T00:00:00Z"}` {
+		t.Errorf("quota Error wire form = %s", b)
+	}
+	b, _ = json.Marshal(PassStatus{Plan: PlanProMCP, QuotaLimit: 10, QuotaUsed: 3})
+	json.Unmarshal(b, &m)
+	for _, k := range []string{"plan", "expires", "quota_limit", "quota_used", "reset_at"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("PassStatus lost wire field %q", k)
+		}
+	}
+}
+
+func TestClassOf(t *testing.T) {
+	for in, want := range map[string]string{
+		"strategies": ClassContent, "strategies/long-call": ClassContent, "articles/greeks/delta": ClassContent,
+		"concepts/delta": ClassContent, "glossary/x": ClassContent, "search": ClassContent,
+		"markets": ClassMarket, "expiries": ClassMarket, "chain": ClassMarket, "quote": ClassMarket,
+		"scan": ClassPremium, "paper/analyze": ClassPremium, "paper/adjust": ClassPremium,
+		"pass": "", "nope": "", "": "",
+	} {
+		if got := ClassOf(in); got != want {
+			t.Errorf("ClassOf(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
